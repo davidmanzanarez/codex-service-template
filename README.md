@@ -1,8 +1,41 @@
 # Codex Service Template
 
-A full-stack Hono + Vite + SQLite service template with auth, rate limiting, metrics, Docker, and CI/CD — ready for a single VPS deployment.
+A full-stack Hono + Vite + SQLite service template designed for a **hub-and-services** architecture on a single VPS. Clone it once per service, replace placeholder names, and you have a production-ready microservice with auth, rate limiting, metrics, Docker, and CI/CD.
 
-Clone it, replace placeholder names, and you have a production-ready microservice.
+## Who is this for?
+
+This template is built for a specific (and practical) deployment pattern: **one central auth hub running N independent services**, all on a single VPS behind a reverse proxy. Instead of each service implementing its own OAuth flow, user management, and session handling, a single **Hub** service owns authentication and issues JWTs. Every service cloned from this template delegates auth to that Hub.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Single VPS (Docker Compose + reverse proxy)                │
+│                                                             │
+│   ┌─────────┐    ┌───────────┐   ┌───────────┐             │
+│   │   Hub   │    │ Service A │   │ Service B │  ...         │
+│   │ (auth)  │    │(this tmpl)│   │(this tmpl)│             │
+│   │ OAuth   │    │ Hono+Vite │   │ Hono+Vite │             │
+│   │ Google  │    │  SQLite   │   │  SQLite   │             │
+│   │ JWT     │    │           │   │           │             │
+│   └────┬────┘    └─────┬─────┘   └─────┬─────┘             │
+│        │               │               │                    │
+│        └───── shared Docker network ────┘                   │
+│                                                             │
+│   ┌──────────────────────────────────┐                      │
+│   │  Reverse proxy (Caddy/nginx)     │                      │
+│   │  hub.example.com  → Hub:4000     │                      │
+│   │  app-a.example.com → A:3000     │                      │
+│   │  app-b.example.com → B:3000     │                      │
+│   └──────────────────────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+- The **Hub** is a separate service you build/deploy once. It handles OAuth (e.g. Google), creates JWTs (HS256), and manages user sessions. All services share the same `JWT_SECRET` so they can verify tokens issued by the Hub.
+- Each **service** (cloned from this template) has its own SQLite database, its own API, and its own frontend. It never touches OAuth directly — it just validates the JWT cookie that the Hub set.
+- A shared `HUB_SECRET` lets the Hub call each service's `/api/hub/summary` endpoint to aggregate metrics into a central dashboard.
+- Setting `COOKIE_DOMAIN` to your root domain (e.g. `.example.com`) enables cross-subdomain SSO — log in once at the Hub, and every service recognizes the session.
+
+This template does **not** include the Hub itself — it's the per-service side of the pattern. You bring your own auth hub (or build one).
 
 ## Quick Start
 
@@ -16,19 +49,19 @@ npm run dev
 
 Server runs on http://localhost:3000, web dev server on http://localhost:3001.
 
-## Architecture
+## Architecture (single service)
 
 ```
 Browser ──→ Vite (dev:3001) ──proxy──→ Hono (3000) ──→ SQLite
                                           │
                                     @codex/shared
-                                     (auth, rate limit, metrics)
+                                   (auth, rate limit, metrics)
                                           │
-                                   Auth Service
-                                   (OAuth + JWT)
+                                    Hub (separate service)
+                                   (OAuth + JWT issuance)
 ```
 
-In production, a single Node process serves both the API and the built frontend static files.
+In production, a single Node process serves both the API and the built frontend static files. No ports are exposed to the host — services communicate over Docker's internal network, and only the reverse proxy binds to ports 80/443.
 
 ## Project Structure
 
@@ -98,10 +131,22 @@ docker run -p 3000:3000 -v $(pwd)/data:/app/data --env-file .env my-service
 
 ### Docker Compose (single VPS)
 
+In a typical setup, you have one `docker-compose.yml` that runs the Hub, a reverse proxy, and all your services on a shared Docker network. Each service cloned from this template gets its own entry. No host port bindings are needed — only the reverse proxy exposes ports 80/443.
+
 Add to your `docker-compose.yml`:
 
 ```yaml
 services:
+  # Your auth hub (not included in this template)
+  hub:
+    build: ./hub
+    container_name: hub
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - app-network
+
+  # A service cloned from this template
   my-service:
     build:
       context: ./my-service
@@ -110,15 +155,27 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - JWT_SECRET=${JWT_SECRET}
-      - HUB_URL=http://auth-service:4000
+      - JWT_SECRET=${JWT_SECRET}        # Must match the Hub
+      - HUB_URL=http://hub:4000         # Docker internal DNS
       - HUB_SECRET=${HUB_SECRET}
       - OWNER_USER_ID=${OWNER_USER_ID}
     volumes:
       - my-service-data:/app/data
     networks:
-      - your-network
+      - app-network
     restart: unless-stopped
+
+  # Reverse proxy routes subdomains to containers
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - app-network
+
+networks:
+  app-network:
 
 volumes:
   my-service-data:
@@ -135,14 +192,24 @@ The deploy workflow runs automatically when CI passes on `main`.
 
 ## Auth Flow
 
-1. User clicks "Login" -> redirected to Hub (`HUB_PUBLIC_URL`)
-2. Hub handles Google OAuth, creates JWT
-3. Hub redirects back to `SELF_URL/api/auth/callback` with JWT
-4. `@codex/shared` middleware sets HttpOnly cookie
-5. Subsequent requests include cookie automatically
-6. `requireAuth` middleware validates JWT on protected routes
+Since this service doesn't handle OAuth itself, authentication is a redirect loop with the Hub:
 
-Cookie domain can be set via `COOKIE_DOMAIN` env var for cross-subdomain SSO.
+1. User visits this service and clicks "Login"
+2. Frontend redirects to the Hub's OAuth endpoint (`HUB_PUBLIC_URL/api/auth/google?returnTo=...`)
+3. Hub handles the full OAuth flow (e.g. Google sign-in) and creates a signed JWT (HS256)
+4. Hub redirects back to this service's callback (`SELF_URL/api/auth/callback`) with the JWT
+5. The `@codex/shared` auth middleware sets the JWT as an HttpOnly cookie
+6. All subsequent requests include the cookie automatically — no tokens in localStorage
+7. `requireAuth` middleware verifies the JWT signature using the shared `JWT_SECRET`
+
+**Key env vars for auth:**
+| Variable | Purpose |
+|---|---|
+| `JWT_SECRET` | Shared secret between Hub and all services — must match |
+| `HUB_URL` | Internal Docker network URL for server-to-server calls (e.g. `http://hub:4000`) |
+| `HUB_PUBLIC_URL` | Browser-facing URL for OAuth redirects (e.g. `https://hub.example.com`) |
+| `SELF_URL` | This service's public URL, used as the OAuth callback destination |
+| `COOKIE_DOMAIN` | Set to root domain (e.g. `.example.com`) for cross-subdomain SSO |
 
 ## Adding Features
 
@@ -191,7 +258,11 @@ app.route('/api/widgets', widgetsRoutes);
 
 ## Hub Summary Endpoint
 
-The `/api/hub/summary` endpoint returns metrics for a central dashboard (Hub). It requires the `X-Hub-Secret` header. Customize the metrics to match your domain:
+When running multiple services behind one Hub, it's useful to have a central dashboard that shows the status of each service at a glance. Each service exposes a `GET /api/hub/summary` endpoint that the Hub can poll to aggregate metrics.
+
+This endpoint is protected by the shared `HUB_SECRET` (passed as `X-Hub-Secret` header), so only the Hub can call it — it's not accessible to end users.
+
+Customize the response to return metrics relevant to your service's domain:
 
 ```typescript
 return c.json({
@@ -206,3 +277,5 @@ return c.json({
   },
 });
 ```
+
+If you don't need a central dashboard, you can safely remove this endpoint from `app.ts` and the `HUB_SECRET` env var.
