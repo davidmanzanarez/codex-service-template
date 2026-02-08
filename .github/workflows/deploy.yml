@@ -1,0 +1,47 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Only deploy if CI passed (or if manually triggered)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/apps/my-service
+
+            echo "=== Pulling latest ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== Rebuilding container ==="
+            cd /opt/apps
+            docker compose build my-service
+            docker compose up -d my-service
+
+            echo "=== Health check ==="
+            for i in 1 2 3 4 5 6; do
+              sleep 5
+              if docker exec my-service wget -qO- http://localhost:3000/api/health 2>/dev/null; then
+                echo " my-service: OK"
+                exit 0
+              fi
+              echo "  Attempt $i failed, retrying..."
+            done
+            echo " my-service: FAILED after 30s"
+            docker compose logs --tail=50 my-service
+            exit 1

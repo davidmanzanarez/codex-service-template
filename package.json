@@ -1,0 +1,20 @@
+{
+  "name": "my-service",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @my-service/server\" \"npm run dev -w @my-service/web\"",
+    "dev:server": "npm run dev -w @my-service/server",
+    "dev:web": "npm run dev -w @my-service/web",
+    "build": "npm run build -w @my-service/server && npm run build -w @my-service/web",
+    "typecheck": "npm run typecheck -w @my-service/web",
+    "start": "npm run start -w @my-service/server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  }
+}
