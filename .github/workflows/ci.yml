@@ -3,32 +3,46 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  typecheck:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run TypeScript type check
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build production image
+        run: docker build -t service-test .
+      - name: Smoke test production image
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs service-test; docker rm -f service-test' EXIT
+          docker run -d --name service-test \
+            -e JWT_SECRET="$(openssl rand -hex 32)" \
+            -e HUB_SECRET="$(openssl rand -hex 32)" \
+            -e HUB_PUBLIC_URL=https://hub.example.com \
+            -e SELF_URL=https://app.example.com \
+            -e FRONTEND_URL=https://app.example.com \
+            service-test
+          for attempt in {1..12}; do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' service-test)" = healthy ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
