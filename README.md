@@ -1,281 +1,133 @@
 # Codex Service Template
 
-A full-stack Hono + Vite + SQLite service template designed for a **hub-and-services** architecture on a single VPS. Clone it once per service, replace placeholder names, and you have a production-ready microservice with auth, rate limiting, metrics, Docker, and CI/CD.
+A TypeScript starter for a Hono API, React/Vite frontend, and SQLite database behind a shared authentication Hub. It demonstrates the per-service side of a small VPS deployment: independent images and data volumes, a shared Docker network, and a reverse proxy as the only public entrypoint.
 
-## Who is this for?
+This repository is an **example**, not a runtime dependency of services created from it. Updating it does not update those services. The Hub and reverse proxy are not included. The `Codex` name here refers to this service suite; running the example does not require an AI API.
 
-This template is built for a specific (and practical) deployment pattern: **one central auth hub running N independent services**, all on a single VPS behind a reverse proxy. Instead of each service implementing its own OAuth flow, user management, and session handling, a single **Hub** service owns authentication and issues JWTs. Every service cloned from this template delegates auth to that Hub.
+## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Single VPS (Docker Compose + reverse proxy)                │
-│                                                             │
-│   ┌─────────┐    ┌───────────┐   ┌───────────┐             │
-│   │   Hub   │    │ Service A │   │ Service B │  ...         │
-│   │ (auth)  │    │(this tmpl)│   │(this tmpl)│             │
-│   │ OAuth   │    │ Hono+Vite │   │ Hono+Vite │             │
-│   │ Google  │    │  SQLite   │   │  SQLite   │             │
-│   │ JWT     │    │           │   │           │             │
-│   └────┬────┘    └─────┬─────┘   └─────┬─────┘             │
-│        │               │               │                    │
-│        └───── shared Docker network ────┘                   │
-│                                                             │
-│   ┌──────────────────────────────────┐                      │
-│   │  Reverse proxy (Caddy/nginx)     │                      │
-│   │  hub.example.com  → Hub:4000     │                      │
-│   │  app-a.example.com → A:3000     │                      │
-│   │  app-b.example.com → B:3000     │                      │
-│   └──────────────────────────────────┘                      │
-└─────────────────────────────────────────────────────────────┘
+```text
+Browser → reverse proxy → service container (Hono + built React app)
+                             ├─ SQLite on a persistent volume
+                             └─ @codex/shared: auth, rate limits, request metrics
+Browser → Hub → shared-domain HttpOnly cookie → service callback
+Hub → service /api/hub/summary (shared secret + target user ID)
+
+GitHub Actions → build image → GHCR → server pulls an immutable digest
 ```
 
-**How it works:**
-- The **Hub** is a separate service you build/deploy once. It handles OAuth (e.g. Google), creates JWTs (HS256), and manages user sessions. All services share the same `JWT_SECRET` so they can verify tokens issued by the Hub.
-- Each **service** (cloned from this template) has its own SQLite database, its own API, and its own frontend. It never touches OAuth directly — it just validates the JWT cookie that the Hub set.
-- A shared `HUB_SECRET` lets the Hub call each service's `/api/hub/summary` endpoint to aggregate metrics into a central dashboard.
-- Setting `COOKIE_DOMAIN` to your root domain (e.g. `.example.com`) enables cross-subdomain SSO — log in once at the Hub, and every service recognizes the session.
+Each service owns its data and deployment lifecycle. The Hub owns OAuth and user admission. All user-session verifiers share an HS256 signing secret: compromise of any verifier therefore affects the entire trust domain. This is a small trusted-suite pattern, not an isolation boundary between untrusted tenants.
 
-This template does **not** include the Hub itself — it's the per-service side of the pattern. You bring your own auth hub (or build one).
+## Quick start
 
-## Quick Start
+Use GitHub's **Use this template**, then clone your new repository:
 
-```bash
-git clone https://github.com/youruser/codex-service-template.git my-service
+```sh
 cd my-service
+nvm install
+nvm use
 cp .env.example .env
-npm install
+npm ci
 npm run dev
 ```
 
-Server runs on http://localhost:3000, web dev server on http://localhost:3001.
+Node 22 is used locally, in CI, and in the container. The API listens on `http://localhost:3000`; Vite on `http://localhost:3001` proxies `/api` to it. A compatible Hub must run separately for login; the health endpoint works without it. Match the Hub's development `JWT_SECRET` and `HUB_SECRET` in `.env`. Use the same hostname (for example, `localhost`) across both applications so the cookie is shared in development.
 
-## Architecture (single service)
-
-```
-Browser ──→ Vite (dev:3001) ──proxy──→ Hono (3000) ──→ SQLite
-                                          │
-                                    @codex/shared
-                                   (auth, rate limit, metrics)
-                                          │
-                                    Hub (separate service)
-                                   (OAuth + JWT issuance)
+```sh
+npm run typecheck  # both server and web
+npm test           # builds both workspaces, then runs regression tests
+npm start          # serve the built API and frontend
 ```
 
-In production, a single Node process serves both the API and the built frontend static files. No ports are exposed to the host — services communicate over Docker's internal network, and only the reverse proxy binds to ports 80/443.
+Configuration and asset paths resolve from the project directory, regardless of the working directory used to launch the process. `data/` contains the default database and is ignored by Git and Docker builds. Tests use in-memory databases.
 
-## Project Structure
+## Authentication contract
 
-```
-├── package.json                  # npm workspaces root
-├── Dockerfile                    # Multi-stage build (node:20-alpine)
-├── .env.example                  # All env vars with placeholders
-├── .github/workflows/
-│   ├── ci.yml                    # Typecheck + build on push/PR
-│   └── deploy.yml                # SSH deploy on CI success
-├── packages/
-│   ├── server/                   # Hono + SQLite + Drizzle
-│   │   └── src/
-│   │       ├── index.ts          # Entry point with ASCII banner
-│   │       ├── app.ts            # Middleware stack + routes + static serving
-│   │       ├── config.ts         # Env loading with production guards
-│   │       ├── db/
-│   │       │   ├── index.ts      # better-sqlite3 + Drizzle, WAL mode
-│   │       │   └── schema.ts     # Drizzle schema (items table)
-│   │       ├── middleware/
-│   │       │   ├── auth.ts       # @codex/shared auth wrapper
-│   │       │   ├── rateLimit.ts  # @codex/shared rate limit wrapper
-│   │       │   └── metrics.ts    # @codex/shared metrics wrapper
-│   │       └── routes/
-│   │           └── items.ts      # Full CRUD example (user-scoped)
-│   └── web/                      # React + Vite + Tailwind
-│       └── src/
-│           ├── main.tsx          # React root + BrowserRouter + AuthProvider
-│           ├── App.tsx           # Auth gate, sidebar nav, routes
-│           ├── index.css         # Tailwind directives + theme
-│           ├── context/
-│           │   └── AuthContext.tsx # User state + login/logout
-│           ├── api/
-│           │   └── client.ts     # Typed fetchApi wrapper + items CRUD
-│           └── pages/
-│               ├── Dashboard.tsx # Simple stats page
-│               └── Items.tsx     # CRUD UI for items entity
-└── data/                         # SQLite database (gitignored)
-```
+1. The frontend navigates to the service's `/api/auth/login` route. No auth URLs or secrets are baked into the frontend bundle.
+2. The service redirects to `HUB_PUBLIC_URL/api/auth/google` with its configured callback URL. Caller-supplied redirect destinations are ignored.
+3. The Hub authenticates the user, checks its callback allowlist, and sets `auth_token` as an HttpOnly, Secure, SameSite=Lax cookie on the shared parent domain.
+4. The Hub redirects to `SELF_URL/api/auth/callback`. The callback verifies the **cookie**. JWT query parameters are not accepted.
+5. The service verifies subsequent session cookies locally. Set `OWNER_USER_ID` to restrict access to one Hub user; leave it empty for user-scoped, multi-user access.
 
-## Customization Checklist
+Configure the same `COOKIE_DOMAIN` on the Hub and service, and deploy them on sibling subdomains. Unrelated domains need a different authentication exchange; this example does not implement one. Logout clears the shared cookie but does not implement server-side token revocation.
 
-Replace these to make the template yours:
+Agent tokens cannot authenticate to ordinary user routes. Agent write endpoints are intentionally absent. If adding them, use the shared library's separate agent middleware with explicit audience, scope, and grant checks; do not reuse user-session middleware.
 
-| Find | Replace with |
-|------|-------------|
-| `my-service` | Your service name (e.g. `task-tracker`) |
-| `@my-service/server` | `@task-tracker/server` |
-| `@my-service/web` | `@task-tracker/web` |
-| Port `3000` / `3001` | Your preferred ports |
-| `items` table | Your domain entity |
-| `/opt/apps/my-service` | Your deploy path in `deploy.yml` |
-| ASCII banner in `index.ts` | Your service name/motto |
-| `My Service` in `index.html` | Your app title |
-| `@codex/shared` GitHub URL | Your own fork if customizing shared libs |
+`@codex/shared` is pinned to a reviewed commit. To upgrade it, update the pin and lockfile together, then run the regression suite. A shared-library change is not automatically inherited by an existing service.
 
-After renaming, run `npm install && npm run build` to verify.
+## Configuration
 
-## Deployment
+Copy `.env.example` for development. Inject production values at runtime; never commit `.env` or pass secrets as Docker build arguments.
 
-### Docker
+| Variable | Contract |
+| --- | --- |
+| `NODE_ENV` | `production` enables startup guards and secure cookies |
+| `PORT` | Valid TCP port; defaults to `3000` |
+| `JWT_SECRET` | Must match Hub; production requires a non-placeholder value of at least 32 characters |
+| `HUB_SECRET` | Separate secret for Hub summaries; same production guard |
+| `HUB_PUBLIC_URL` | Public Hub origin, not its internal Docker address |
+| `SELF_URL` | This service's public origin; callback is `/api/auth/callback` |
+| `FRONTEND_URL` | Frontend origin; normally equal to `SELF_URL` in production |
+| `COOKIE_DOMAIN` | Shared parent domain, for example `.example.com` |
+| `OWNER_USER_ID` | Optional Hub user ID for owner-only access |
+| `CORS_ORIGINS` | Additional exact origins, comma-separated; no wildcard |
+| `DB_PATH` | Defaults to `data/my-service.db` under the project root |
+| `SERVICE_IMAGE` | Compose image reference; use the published digest |
 
-```bash
-docker build -t my-service .
-docker run -p 3000:3000 -v $(pwd)/data:/app/data --env-file .env my-service
-```
+All three public URL variables are required HTTPS origins in production. CORS allows the service/frontend origins plus explicit additions; localhost is not automatically trusted in production. The example also rejects cross-origin simple form submissions with CSRF middleware. CORS alone is not authentication.
 
-### Docker Compose (single VPS)
+## API and operations
 
-In a typical setup, you have one `docker-compose.yml` that runs the Hub, a reverse proxy, and all your services on a shared Docker network. Each service cloned from this template gets its own entry. No host port bindings are needed — only the reverse proxy exposes ports 80/443.
+- `GET /api/health`: database readiness, `200` or `503`. No authentication or rate-limit budget required.
+- `/api/auth/*`: session introspection, login, callback, and logout.
+- `/api/items`: authenticated CRUD, scoped to the current user.
+- `GET /api/hub/summary`: item count for `X-User-Id`, authenticated by `X-Hub-Secret`. Owner-only mode also restricts the target user.
+- Unknown `/api/*` routes return JSON `404`; frontend routes fall back to the SPA.
 
-Add to your `docker-compose.yml`:
+The example rate limits are adjustable defaults. One middleware selects each endpoint's policy, avoiding double-counting nested auth requests. Health and Hub polling are excluded from in-memory request metrics. These metrics reset on restart and are not an authoritative visitor counter; use reverse-proxy access logs for external traffic.
 
-```yaml
-services:
-  # Your auth hub (not included in this template)
-  hub:
-    build: ./hub
-    container_name: hub
-    environment:
-      - JWT_SECRET=${JWT_SECRET}
-    networks:
-      - app-network
+Keep service ports private. The shared IP helper assumes a trusted reverse proxy controls `X-Forwarded-For`/`X-Real-IP`. Configure the proxy to overwrite or sanitize incoming forwarding headers, and review the helper before introducing another proxy/CDN hop.
 
-  # A service cloned from this template
-  my-service:
-    build:
-      context: ./my-service
-      dockerfile: Dockerfile
-    container_name: my-service
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - JWT_SECRET=${JWT_SECRET}        # Must match the Hub
-      - HUB_URL=http://hub:4000         # Docker internal DNS
-      - HUB_SECRET=${HUB_SECRET}
-      - OWNER_USER_ID=${OWNER_USER_ID}
-    volumes:
-      - my-service-data:/app/data
-    networks:
-      - app-network
-    restart: unless-stopped
+## Images and deployment
 
-  # Reverse proxy routes subdomains to containers
-  caddy:
-    image: caddy:2-alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    networks:
-      - app-network
+CI runs typechecks, regression tests, a Docker build, and a production-container health smoke test. It never deploys. The former SSH/server-build workflow has been replaced by an **opt-in, manually dispatched image publisher**:
 
-networks:
-  app-network:
+1. In your derived repository, set repository variable `ENABLE_IMAGE_PUBLISHING=true`.
+2. Run **Publish image** on `main`. It validates and builds that exact revision on the GitHub runner, then pushes `ghcr.io/<owner>/<repo>:<commit>` for `linux/amd64`.
+3. Copy the immutable `SERVICE_IMAGE=...@sha256:...` reference from the workflow summary. Change the platform if your server uses another architecture.
+4. Authenticate the server to GHCR if the package is private. Keep registry credentials on the server; do not store them in this repository.
+5. Merge `compose.example.yml` into your Hub/proxy Compose project, provide production environment values, and route your service's domain to `my-service:3000`.
+6. Pull and restart only this service:
 
-volumes:
-  my-service-data:
+```sh
+docker compose pull my-service
+docker compose up -d --no-build --no-deps my-service
+docker compose exec -T my-service node -e \
+  "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 ```
 
-### GitHub Actions
+The standalone Compose example needs an existing Hub and a proxy on the same network. It intentionally publishes no host ports. No SSH secrets, droplet paths, automatic production deployment, or live infrastructure identifiers are embedded in this repository.
 
-Set these secrets in your repo:
-- `SSH_HOST` — Your server IP
-- `SSH_USER` — SSH username
-- `SSH_PRIVATE_KEY` — SSH private key
+For rollback, retain the previous image digest and repeat pull/up with that reference. Database migrations must remain compatible with the rollback image, or require a tested restore. Do not prune the rollback image during deployment.
 
-The deploy workflow runs automatically when CI passes on `main`.
+The image runs as UID/GID `1001`; named volumes initialize with the image's data-directory ownership. If using bind mounts or an existing volume, provision write access for that user. SIGTERM drains requests and closes SQLite, with a ten-second shutdown deadline.
 
-## Auth Flow
+## Persistence and backups
 
-Since this service doesn't handle OAuth itself, authentication is a redirect loop with the Hub:
+The volume survives container replacement; it is not a backup. Schedule SQLite's online backup API or `sqlite3 .backup`, store a copy off-host, and periodically test restoration into a separate volume. Copying only a live `.db` file can omit writes still in its WAL. Database files and secrets must never enter Git, build contexts, or images.
 
-1. User visits this service and clicks "Login"
-2. Frontend redirects to the Hub's OAuth endpoint (`HUB_PUBLIC_URL/api/auth/google?returnTo=...`)
-3. Hub handles the full OAuth flow (e.g. Google sign-in) and creates a signed JWT (HS256)
-4. Hub redirects back to this service's callback (`SELF_URL/api/auth/callback`) with the JWT
-5. The `@codex/shared` auth middleware sets the JWT as an HttpOnly cookie
-6. All subsequent requests include the cookie automatically — no tokens in localStorage
-7. `requireAuth` middleware verifies the JWT signature using the shared `JWT_SECRET`
+The sample table is initialized with `CREATE TABLE IF NOT EXISTS`; it is not a migration system. Add versioned migrations before evolving a real schema, and back up before running them. If your service adds attachments, include them in its backup and restore procedure.
 
-**Key env vars for auth:**
-| Variable | Purpose |
-|---|---|
-| `JWT_SECRET` | Shared secret between Hub and all services — must match |
-| `HUB_URL` | Internal Docker network URL for server-to-server calls (e.g. `http://hub:4000`) |
-| `HUB_PUBLIC_URL` | Browser-facing URL for OAuth redirects (e.g. `https://hub.example.com`) |
-| `SELF_URL` | This service's public URL, used as the OAuth callback destination |
-| `COOKIE_DOMAIN` | Set to root domain (e.g. `.example.com`) for cross-subdomain SSO |
+## Customize
 
-## Adding Features
+| Replace | With |
+| --- | --- |
+| `my-service`, `@my-service/server`, `@my-service/web` | Your service and workspace names |
+| `My Service` and entrypoint banner | Your application title |
+| `items` schema, routes, pages, and summary | Your domain model |
+| `3000` / `3001` | Your local API/frontend ports, including Vite's proxy target |
+| Compose service, volume, and network names | Your infrastructure's names |
 
-### New API Route
+Server code lives in `packages/server/src`; web code in `packages/web/src`. Register protected routes with `requireAuth`, filter database reads and writes by `getUser(c).id`, and place API handlers before the JSON catch-all. Extend the example's input validation and add pagination/body limits appropriate to your domain before exposing a real workload.
 
-1. Create `packages/server/src/routes/widgets.ts`:
-```typescript
-import { Hono } from 'hono';
-import { db } from '../db/index.js';
-import { widgets } from '../db/schema.js';
-import { getUser } from '../middleware/auth.js';
-import { eq, and } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
-
-const app = new Hono();
-
-app.get('/', async (c) => {
-  const user = getUser(c);
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  const results = await db.select().from(widgets)
-    .where(eq(widgets.userId, user.id));
-  return c.json({ widgets: results });
-});
-
-export default app;
-```
-
-2. Add to `app.ts`:
-```typescript
-import widgetsRoutes from './routes/widgets.js';
-app.use('/api/widgets/*', requireAuth);
-app.route('/api/widgets', widgetsRoutes);
-```
-
-### New DB Table
-
-1. Add Drizzle schema in `packages/server/src/db/schema.ts`
-2. Add `CREATE TABLE IF NOT EXISTS` in `packages/server/src/db/index.ts`
-
-### New Page
-
-1. Create `packages/web/src/pages/Widgets.tsx`
-2. Add route in `App.tsx`
-3. Add nav item to `NAV_ITEMS` array
-4. Add API methods to `client.ts`
-
-## Hub Summary Endpoint
-
-When running multiple services behind one Hub, it's useful to have a central dashboard that shows the status of each service at a glance. Each service exposes a `GET /api/hub/summary` endpoint that the Hub can poll to aggregate metrics.
-
-This endpoint is protected by the shared `HUB_SECRET` (passed as `X-Hub-Secret` header), so only the Hub can call it — it's not accessible to end users.
-
-Customize the response to return metrics relevant to your service's domain:
-
-```typescript
-return c.json({
-  service: 'my-service',
-  status: 'healthy',
-  metrics: {
-    primary: { label: 'Total Items', value: 42, trend: 'up' },
-    secondary: [
-      { label: 'Active', value: 15 },
-      { label: 'Completed', value: 27 },
-    ],
-  },
-});
-```
-
-If you don't need a central dashboard, you can safely remove this endpoint from `app.ts` and the `HUB_SECRET` env var.
+After renaming workspaces, run `npm install` to update the lockfile, then `npm run typecheck` and `npm test`. Keep contributions small and focused, with a regression test for changed behavior. Do not include production data, credentials, or private infrastructure details in issues or patches.
