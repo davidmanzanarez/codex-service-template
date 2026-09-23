@@ -10,17 +10,22 @@ import {
   type RequestMetric,
   type AggregatedStats,
 } from '@codex/shared';
+import type { MiddlewareHandler } from 'hono';
 import { getUser } from './auth.js';
 
 export type { RequestMetric, AggregatedStats, MetricsStore };
 
 export const metricsStore: MetricsStore = createMetricsStore(1000);
 
-export function metricsLogger(serviceName: string) {
-  return sharedMetricsLogger(serviceName, {
+export function metricsLogger(serviceName: string): MiddlewareHandler {
+  const middleware = sharedMetricsLogger(serviceName, {
     store: metricsStore,
     getUserId: (c) => getUser(c)?.id,
   });
+  return (c, next) => {
+    if (c.req.path === '/api/health' || c.req.path.startsWith('/api/hub/')) return next();
+    return middleware(c, next);
+  };
 }
 
 export function getRecentMetrics(limit = 100): RequestMetric[] {

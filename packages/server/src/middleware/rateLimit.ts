@@ -9,8 +9,6 @@ export type { RateLimitConfig, RateLimitOptions };
 
 const rateLimitStore = createRateLimitStore();
 
-export function rateLimiter(config: RateLimitConfig) {
-  return sharedRateLimiter(rateLimitStore, {
-    default: config,
-  });
+export function rateLimiter(options: RateLimitOptions) {
+  return sharedRateLimiter(rateLimitStore, options);
 }
