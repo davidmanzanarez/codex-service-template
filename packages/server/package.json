@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@codex/shared": "github:davidmanzanarez/codex-shared-libraries",
+    "@codex/shared": "git+https://github.com/davidmanzanarez/codex-shared-libraries.git#b54e81acb68cf8ae7883b752bea6726d12ff2a0b",
     "@hono/node-server": "^1.13.7",
     "better-sqlite3": "^11.6.0",
     "dotenv": "^16.4.5",

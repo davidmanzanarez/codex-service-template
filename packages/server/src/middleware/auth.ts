@@ -11,6 +11,7 @@ const authConfig: AuthMiddlewareConfig = {
   jwtSecret: env.jwtSecret,
   hubPublicUrl: env.hubPublicUrl,
   frontendUrl: env.frontendUrl,
+  ownerUserId: env.ownerUserId,
 };
 
 const { requireAuth, optionalAuth, getUser } = createAuthMiddleware(authConfig);

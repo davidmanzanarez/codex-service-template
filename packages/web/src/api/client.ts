@@ -1,8 +1,4 @@
 const API_BASE = '/api';
-const isProd = import.meta.env.PROD;
-const HUB_URL = import.meta.env.VITE_HUB_URL || (isProd ? '' : 'http://localhost:4000');
-const SELF_URL = import.meta.env.VITE_SELF_URL || (isProd ? '' : 'http://localhost:3000');
-
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
@@ -62,7 +58,7 @@ export const api = {
   auth: {
     me: () => fetchApi<AuthStatus>('/auth/me'),
     logout: () => fetchApi<{ success: boolean }>('/auth/logout', { method: 'POST' }),
-    loginUrl: () => `${HUB_URL}/api/auth/google?returnTo=${encodeURIComponent(`${SELF_URL}/api/auth/callback`)}`,
+    loginUrl: () => `${API_BASE}/auth/login`,
   },
 
   items: {

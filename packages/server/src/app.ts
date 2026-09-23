@@ -6,7 +6,7 @@ import { createAuthRoutes } from '@codex/shared';
 import { env } from './config.js';
 
 import itemsRoutes from './routes/items.js';
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, optionalAuth, getUser } from './middleware/auth.js';
 import { rateLimiter } from './middleware/rateLimit.js';
 import { metricsLogger } from './middleware/metrics.js';
 
@@ -17,16 +17,8 @@ export function createApp() {
   app.use('*', logger());
   app.use('*', metricsLogger('my-service'));
 
-  const corsOrigins = [
-    'http://localhost:3001',
-    'http://localhost:3000',
-    'http://localhost:4000',
-    'http://localhost:4001',
-    ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : []),
-  ].filter(Boolean);
-
   app.use('*', cors({
-    origin: corsOrigins,
+    origin: env.corsOrigins,
     credentials: true,
   }));
 
@@ -41,6 +33,17 @@ export function createApp() {
     selfUrl: env.selfUrl,
     frontendUrl: env.frontendUrl,
     cookieDomain: env.cookieDomain,
+  });
+  // Apply the same owner/agent admission policy to session introspection.
+  app.get('/api/auth/me', optionalAuth, (c) => {
+    const user = getUser(c);
+    return c.json({ authenticated: !!user, user, loginUrl: '/api/auth/login' });
+  });
+  // Use the configured callback only; never relay an arbitrary returnTo.
+  app.get('/api/auth/login', (c) => {
+    const loginUrl = new URL('/api/auth/google', env.hubPublicUrl);
+    loginUrl.searchParams.set('returnTo', `${env.selfUrl}/api/auth/callback`);
+    return c.redirect(loginUrl.toString());
   });
   app.route('/api/auth', authRoutes);
 
@@ -80,9 +83,7 @@ export function createApp() {
   app.route('/api/items', itemsRoutes);
 
   // Serve frontend (production)
-  const webDistPath = process.env.NODE_ENV === 'production'
-    ? './packages/web/dist'
-    : '../web/dist';
+  const webDistPath = env.webDistPath;
   app.use('/*', serveStatic({ root: webDistPath }));
   app.get('*', serveStatic({ path: `${webDistPath}/index.html` }));
 
