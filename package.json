@@ -12,7 +12,7 @@
     "build": "npm run build -w @my-service/server && npm run build -w @my-service/web",
     "typecheck": "npm run typecheck --workspaces",
     "start": "npm run start -w @my-service/server",
-    "test": "npm run build -w @my-service/server && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

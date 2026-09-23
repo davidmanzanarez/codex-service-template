@@ -1,0 +1,33 @@
+# Merge this service into your Hub/reverse-proxy Compose project.
+# The proxy must share app-network and route to my-service:3000.
+services:
+  my-service:
+    image: ${SERVICE_IMAGE:?Set SERVICE_IMAGE to a published image digest}
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_PATH: /app/data/my-service.db
+      JWT_SECRET: ${JWT_SECRET:?Must match the Hub}
+      HUB_SECRET: ${HUB_SECRET:?Must match the Hub}
+      HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:?Set the public HTTPS Hub origin}
+      SELF_URL: ${SELF_URL:?Set this service public HTTPS origin}
+      FRONTEND_URL: ${FRONTEND_URL:?Set this service public HTTPS origin}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:?Set the shared parent cookie domain}
+      OWNER_USER_ID: ${OWNER_USER_ID:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    volumes:
+      - my-service-data:/app/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No published ports: only the reverse proxy accepts public connections.
+networks:
+  app-network:
+volumes:
+  my-service-data:

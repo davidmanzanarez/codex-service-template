@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { env } from './config.js';
-import { initializeDatabase } from './db/index.js';
+import { initializeDatabase, sqlite } from './db/index.js';
 
 const banner = `
 \x1b[36m┌────────────────────────────────────────┐
@@ -19,7 +19,7 @@ async function main() {
 
   const app = createApp();
 
-  serve({
+  const server = serve({
     fetch: app.fetch,
     port: env.port,
   }, (info) => {
@@ -29,6 +29,25 @@ async function main() {
       console.log('Debug mode: enabled');
     }
   });
+
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    const deadline = setTimeout(() => process.exit(1), 10_000);
+    deadline.unref();
+    server.close(() => {
+      sqlite.close();
+      clearTimeout(deadline);
+      process.exit(0);
+    });
+    if ('closeIdleConnections' in server) server.closeIdleConnections();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
