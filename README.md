@@ -1,8 +1,31 @@
 # Codex Service Template
 
+<p align="center">
+  <a href="docs/demo/codex-service-template-demo.mp4"><img src="docs/demo/codex-service-template-demo.gif" width="100%" alt="codex-service-template in 20 seconds: use the template, run it, sign in through a Hub, create an item, rename items to your own domain, the built-in safeguards, CI, and a one-service deploy."></a>
+</p>
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/davidmanzanarez/codex-service-template@main/docs/demo/codex-service-template-demo.mp4"><b>&#9654; Watch with sound</b></a> &middot; 20 s &middot; the real template app, run locally with a demo user
+</p>
+
 A TypeScript starter for a Hono API, React/Vite frontend, and SQLite database behind a shared authentication Hub. It demonstrates the per-service side of a small VPS deployment: independent images and data volumes, a shared Docker network, and a reverse proxy as the only public entrypoint.
 
 This repository is an **example**, not a runtime dependency of services created from it. Updating it does not update those services. The Hub and reverse proxy are not included. The `Codex` name here refers to this service suite; running the example does not require an AI API.
+
+## What you get
+
+- A Hono API and a React/Vite app in one repository, served from one container.
+- Sign-in through your Hub. The service checks the Hub's HttpOnly cookie itself and never handles a password.
+- Per-user data in SQLite. The example filters every read and write by the signed-in user's ID.
+- Owner-only mode behind one variable, `OWNER_USER_ID`.
+- Rate limits and request metrics from `@codex/shared`, plus a CSRF guard.
+- `GET /api/health` for probes, and `GET /api/hub/summary` so your Hub can show a number from this service.
+- CI that typechecks, runs the regression tests, builds the Docker image and smoke-tests the running container.
+- An opt-in workflow that publishes the image to GHCR with an immutable `@sha256` reference, for deploys and rollbacks.
+- A non-root image that drains requests and closes SQLite when it stops.
+
+## What you can build
+
+Anything that is a list of things per person. The example entity is `items`: a title, a description and a status. Rename it to runs, books, recipes or trips, change the fields, and the sign-in, storage, CI and deploy path stay as they are. The same layout runs seven services behind one Hub.
 
 ## Architecture
 
