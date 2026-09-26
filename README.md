@@ -1,6 +1,12 @@
 # Codex Service Template
 
 <p align="center">
+  <a href="https://github.com/davidmanzanarez/codex-service-template/actions/workflows/ci.yml"><img src="https://github.com/davidmanzanarez/codex-service-template/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3b82f6.svg" alt="License: MIT"></a>
+  <a href=".nvmrc"><img src="https://img.shields.io/badge/node-22-3b82f6.svg" alt="Node 22"></a>
+</p>
+
+<p align="center">
   <a href="docs/demo/codex-service-template-demo.mp4"><img src="docs/demo/codex-service-template-demo.gif" width="100%" alt="codex-service-template in 20 seconds: use the template, run it, sign in through a Hub, create an item, rename items to your own domain, the built-in safeguards, CI, and a one-service deploy."></a>
 </p>
 <p align="center">
@@ -8,6 +14,9 @@
 </p>
 
 A TypeScript starter for a Hono API, React/Vite frontend, and SQLite database behind a shared authentication Hub. It demonstrates the per-service side of a small VPS deployment: independent images and data volumes, a shared Docker network, and a reverse proxy as the only public entrypoint.
+
+> [!NOTE]
+> This repository is a demo and a blueprint. It pins down one layout for a small service so that new services, including ones a coding agent builds from it, come out the same way every time. It is a starting point, not a showcase of production engineering.
 
 This repository is an **example**, not a runtime dependency of services created from it. Updating it does not update those services. The Hub and reverse proxy are not included. The `Codex` name here refers to this service suite; running the example does not require an AI API.
 
@@ -154,3 +163,7 @@ The sample table is initialized with `CREATE TABLE IF NOT EXISTS`; it is not a m
 Server code lives in `packages/server/src`; web code in `packages/web/src`. Register protected routes with `requireAuth`, filter database reads and writes by `getUser(c).id`, and place API handlers before the JSON catch-all. Extend the example's input validation and add pagination/body limits appropriate to your domain before exposing a real workload.
 
 After renaming workspaces, run `npm install` to update the lockfile, then `npm run typecheck` and `npm test`. Keep contributions small and focused, with a regression test for changed behavior. Do not include production data, credentials, or private infrastructure details in issues or patches.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
