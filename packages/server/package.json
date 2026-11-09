@@ -11,18 +11,18 @@
   },
   "dependencies": {
     "@codex/shared": "git+https://github.com/davidmanzanarez/codex-shared-libraries.git#b54e81acb68cf8ae7883b752bea6726d12ff2a0b",
-    "@hono/node-server": "^1.13.7",
+    "@hono/node-server": "^2.1.6",
     "better-sqlite3": "^11.6.0",
     "dotenv": "^16.4.5",
-    "drizzle-orm": "^0.36.4",
-    "hono": "^4.6.12",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.17",
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.1",
-    "drizzle-kit": "^0.28.1",
+    "drizzle-kit": "^0.31.11",
     "tsx": "^4.19.2",
     "typescript": "^5.3.3"
   }
