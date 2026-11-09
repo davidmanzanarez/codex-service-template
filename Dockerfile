@@ -9,7 +9,10 @@ COPY packages/server/package*.json ./packages/server/
 COPY packages/web/package*.json ./packages/web/
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev --ignore-scripts
+RUN npm run build && npm prune --omit=dev --ignore-scripts && \
+    # npm may nest a workspace's deps (drizzle-orm 0.45 lands in packages/server/node_modules);
+    # make sure the dir exists so the COPY below never fails, empty or not.
+    mkdir -p packages/server/node_modules
 
 FROM node:22-alpine AS production
 WORKDIR /app
@@ -22,6 +25,7 @@ RUN apk upgrade --no-cache ca-certificates-bundle && \
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/server/package.json ./packages/server/
+COPY --from=builder /app/packages/server/node_modules ./packages/server/node_modules
 COPY --from=builder /app/packages/web/package.json ./packages/web/
 COPY --from=builder /app/packages/server/dist ./packages/server/dist
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
